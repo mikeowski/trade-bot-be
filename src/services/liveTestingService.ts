@@ -3,6 +3,23 @@ import { TradingCore, TradeMetrics } from './tradingCore';
 import { TechnicalIndicators, KlineData } from './indicatorService';
 import { EventEmitter } from 'events';
 import { getHistoricalData } from './priceService';
+import { Strategy, StrategyCondition, IndicatorType } from './strategyService';
+import { RiskManagementService } from './riskManagementService';
+
+// Dinamik indikatör değerleri için interface güncellendi
+interface IndicatorValues {
+  [key: string]:
+    | number
+    | {
+        value?: number;
+        signal?: number;
+        histogram?: number;
+        upper?: number;
+        middle?: number;
+        lower?: number;
+      };
+  price: number; // Price is always required
+}
 
 interface LiveTradeStatus {
   strategyId: string;
@@ -30,23 +47,21 @@ interface LiveTradeStatus {
   lastPingTime?: number;
   reconnectAttempts?: number;
   klines: KlineData[];
-}
-
-interface IndicatorValues {
-  rsi: number;
-  macd: {
-    value: number;
-    signal: number;
-    histogram: number;
-  };
-  price: number;
+  strategy: Strategy;
+  previousIndicators?: IndicatorValues; // Crossover kontrolleri için eklendi
 }
 
 interface LiveTradingStrategy {
-  rules: {
-    buy: string;
-    sell: string;
+  indicators: {
+    [key in IndicatorType]?: {
+      type: string;
+      params: {
+        [key: string]: number | string;
+      };
+    };
   };
+  entryConditions: StrategyCondition[];
+  exitConditions: StrategyCondition[];
   riskManagement: {
     stopLoss: number;
     takeProfit: number;
@@ -128,16 +143,23 @@ export class LiveTradingService extends TradingCore {
 
     const timeframe = this.getValidTimeframe(strategy.timeframe || '1m');
 
-    // 1. Combined stream kullanımı
+    // Use combined stream with both base endpoints for redundancy
+    const wsEndpoints = [
+      `wss://stream.binance.com:9443`,
+      `wss://stream.binance.com:443`
+    ];
+
+    // Try primary endpoint first, fallback to secondary
     const ws = new WebSocket(
-      `wss://stream.binance.com:9443/stream?streams=${symbol.toLowerCase()}@kline_${timeframe}/${symbol.toLowerCase()}@trade`
+      `${
+        wsEndpoints[0]
+      }/stream?streams=${symbol.toLowerCase()}@kline_${timeframe}/${symbol.toLowerCase()}@trade`
     );
 
-    // 2. Subscribe/Unsubscribe mekanizması ekle
     ws.on('open', () => {
       console.log(`[${symbol}] WebSocket connection established`);
 
-      // Subscribe to streams
+      // Subscribe to streams with proper ID
       const subscribeMessage = {
         method: 'SUBSCRIBE',
         params: [
@@ -149,38 +171,45 @@ export class LiveTradingService extends TradingCore {
       ws.send(JSON.stringify(subscribeMessage));
     });
 
-    // 3. Ping/Pong mekanizmasını düzelt
+    // Implement proper ping/pong handling per Binance docs
     let pingTimeout: NodeJS.Timeout;
     const heartbeat = () => {
       clearTimeout(pingTimeout);
 
-      // 10 dakika içinde pong gelmezse bağlantıyı kapat
+      // Disconnect if no pong received within 10 minutes
       pingTimeout = setTimeout(() => {
         console.log(`[${symbol}] WebSocket connection timed out`);
         ws.terminate();
-      }, 10 * 60 * 1000); // 10 minutes
+      }, 10 * 60 * 1000);
     };
 
-    ws.on('ping', () => {
-      ws.pong(); // Ping geldiğinde hemen pong gönder
+    ws.on('ping', (data) => {
+      ws.pong(data); // Echo back ping payload
       heartbeat();
     });
 
-    ws.on('pong', () => {
-      heartbeat();
-    });
+    ws.on('pong', heartbeat);
 
-    // İlk heartbeat'i başlat
+    // Start heartbeat on connection
     heartbeat();
 
-    // 4. Message handler'ı güncelle
+    // Handle incoming messages with proper rate limiting
     ws.on('message', (data) => {
       try {
+        // Check rate limits before processing
         if (this.isRateLimited(tradeId)) {
           return;
         }
 
         const message = JSON.parse(data.toString());
+
+        // Handle subscription responses
+        if (message.result === null) {
+          console.log(`[${symbol}] Successfully subscribed to streams`);
+          return;
+        }
+
+        // Handle stream data
         if (!message.data) {
           console.warn('Received malformed message:', message);
           return;
@@ -188,7 +217,7 @@ export class LiveTradingService extends TradingCore {
 
         const streamData = message.data;
 
-        // Kline verisi
+        // Process kline data
         if (streamData.e === 'kline') {
           const klineData = TechnicalIndicators.parseWebSocketKline(
             streamData.k
@@ -207,7 +236,7 @@ export class LiveTradingService extends TradingCore {
 
             // İndikatörleri hesapla ve trade mantığını çalıştır
             if (trade.klines.length >= 50) {
-              this.processTradeLogic(trade, strategy, klineData);
+              this.processTradeLogic(trade, klineData);
             }
           } else {
             // Mum henüz kapanmadı, ama indikatörleri güncelleyebiliriz
@@ -218,7 +247,10 @@ export class LiveTradingService extends TradingCore {
 
               // İndikatörleri hesapla ama trade mantığını çalıştırma
               if (tempKlines.length >= 50) {
-                const indicators = this.calculateIndicators(tempKlines);
+                const indicators = this.calculateIndicators(
+                  tempKlines,
+                  trade.strategy
+                );
                 trade.currentIndicators = indicators;
               }
             }
@@ -229,63 +261,81 @@ export class LiveTradingService extends TradingCore {
       }
     });
 
-    // 5. Error ve Close handler'larını güncelle
+    // Enhanced error handling
     ws.on('error', (error) => {
       console.error(`[${symbol}] WebSocket error:`, error);
       clearTimeout(pingTimeout);
+
       const trade = this.liveTrades.get(tradeId);
       if (trade) {
         trade.lastError = `WebSocket error: ${error.message}`;
       }
+
+      // Attempt reconnection on error
+      this.handleReconnection(tradeId, symbol, strategy);
     });
 
     ws.on('close', () => {
       console.log(`[${symbol}] WebSocket connection closed`);
       clearTimeout(pingTimeout);
+
+      // Attempt reconnection on close if trade is still running
       const trade = this.liveTrades.get(tradeId);
       if (trade && trade.status === 'running') {
-        const currentAttempt = this.reconnectAttempts.get(tradeId) || 0;
-        const delay = Math.min(
-          1000 * Math.pow(2, currentAttempt),
-          this.MAX_RECONNECT_DELAY
-        );
-        this.reconnectAttempts.set(tradeId, currentAttempt + 1);
-
-        console.log(`Reconnecting in ${delay / 1000} seconds...`);
-        setTimeout(() => {
-          this.reconnectWebSocket(tradeId, symbol, strategy);
-        }, delay);
+        this.handleReconnection(tradeId, symbol, strategy);
       }
     });
 
     return ws;
   }
 
+  // Helper method to handle reconnection logic
+  private handleReconnection(
+    tradeId: string,
+    symbol: string,
+    strategy: LiveTradingStrategy
+  ): void {
+    const currentAttempt = this.reconnectAttempts.get(tradeId) || 0;
+
+    // Implement exponential backoff with max delay
+    const delay = Math.min(
+      this.RECONNECT_DELAY * Math.pow(2, currentAttempt),
+      this.MAX_RECONNECT_DELAY
+    );
+
+    this.reconnectAttempts.set(tradeId, currentAttempt + 1);
+
+    console.log(
+      `[${symbol}] Attempting reconnection in ${delay / 1000}s (attempt ${
+        currentAttempt + 1
+      }/${this.MAX_RECONNECT_ATTEMPTS})`
+    );
+
+    setTimeout(() => {
+      this.reconnectWebSocket(tradeId, symbol, strategy);
+    }, delay);
+  }
+
+  // Update rate limiting implementation
   private isRateLimited(tradeId: string): boolean {
     const now = Date.now();
     const messages = this.messageRateLimiter.get(tradeId) || [];
 
-    // Son 1 saniyedeki mesajları filtrele
+    // Keep only messages within the last second
     const recentMessages = messages.filter(
       (time) => now - time < this.MESSAGE_WINDOW
     );
 
-    // Bağlantı limitini kontrol et
-    this.connectionAttempts = this.connectionAttempts.filter(
-      (time) => now - time < this.CONNECTION_WINDOW
-    );
-
-    // Rate limit kontrolü
+    // Check against Binance's 5 messages per second limit
     if (recentMessages.length >= this.MAX_MESSAGES_PER_SECOND) {
-      console.warn(
-        `Rate limit exceeded for ${tradeId}. Waiting for next window...`
-      );
+      console.warn(`[${tradeId}] Rate limit exceeded, message dropped`);
       return true;
     }
 
-    // Mesajı ekle
+    // Update message history
     recentMessages.push(now);
     this.messageRateLimiter.set(tradeId, recentMessages);
+
     return false;
   }
 
@@ -374,7 +424,7 @@ export class LiveTradingService extends TradingCore {
   async startLiveTrade(
     strategyId: string,
     symbol: string,
-    strategy: LiveTradingStrategy
+    strategy: Strategy & { timeframe?: string }
   ): Promise<string> {
     if (!strategyId || !symbol || !strategy) {
       throw new Error('Missing required parameters for live trading');
@@ -420,14 +470,15 @@ export class LiveTradingService extends TradingCore {
         },
         currentBalance: this.getCurrentBalance(),
         trades: this.getTrades(),
-        klines: historicalKlines
+        klines: historicalKlines,
+        strategy: strategy
       };
 
       this.liveTrades.set(tradeId, tradeStatus);
 
       // Calculate initial indicators if we have enough data
       if (historicalKlines.length >= 50) {
-        const indicators = this.calculateIndicators(historicalKlines);
+        const indicators = this.calculateIndicators(historicalKlines, strategy);
         console.log(indicators);
         tradeStatus.currentIndicators = indicators;
       }
@@ -482,71 +533,265 @@ export class LiveTradingService extends TradingCore {
     return trade;
   }
 
-  protected calculateIndicators(klines: KlineData[]): IndicatorValues {
+  private calculateIndicators(
+    klines: KlineData[],
+    strategy: Strategy
+  ): IndicatorValues {
     try {
-      TechnicalIndicators.validateKlineData(klines, 50);
-
-      const rsi = TechnicalIndicators.calculateRSI(klines, 14);
-      const macd = TechnicalIndicators.calculateMACD(klines, 12, 26, 9);
-
-      return {
-        rsi: rsi[rsi.length - 1].value,
-        macd: {
-          value: macd[macd.length - 1].value[0],
-          signal: macd[macd.length - 1].value[1],
-          histogram: macd[macd.length - 1].value[2]
-        },
+      // Initialize with required price field
+      const indicators: IndicatorValues = {
         price: klines[klines.length - 1].close
       };
+
+      for (const [name, config] of Object.entries(strategy.indicators)) {
+        switch (config.type.toLowerCase()) {
+          case 'rsi': {
+            const rsi = TechnicalIndicators.calculateRSI(
+              klines,
+              (config.params.period as number) || 14
+            );
+            indicators[name] = rsi[rsi.length - 1].value;
+            break;
+          }
+          case 'macd': {
+            const macd = TechnicalIndicators.calculateMACD(
+              klines,
+              (config.params.fastPeriod as number) || 12,
+              (config.params.slowPeriod as number) || 26,
+              (config.params.signalPeriod as number) || 9
+            );
+            const latest = macd[macd.length - 1];
+            indicators[name] = {
+              value: latest.value[0],
+              signal: latest.value[1],
+              histogram: latest.value[2]
+            };
+            break;
+          }
+          case 'bollinger': {
+            const bb = TechnicalIndicators.calculateBollingerBands(
+              klines,
+              (config.params.period as number) || 20,
+              (config.params.stdDev as number) || 2
+            );
+            indicators[name] = {
+              value: bb.middle[bb.middle.length - 1], // Ana değer olarak middle band'i kullan
+              upper: bb.upper[bb.upper.length - 1],
+              middle: bb.middle[bb.middle.length - 1],
+              lower: bb.lower[bb.lower.length - 1]
+            };
+            break;
+          }
+          case 'sma': {
+            const sma = TechnicalIndicators.calculateSMA(
+              klines,
+              (config.params.period as number) || 20
+            );
+            indicators[name] = {
+              value: sma[sma.length - 1].value as number
+            };
+            break;
+          }
+          case 'ema': {
+            const ema = TechnicalIndicators.calculateEMA(
+              klines,
+              (config.params.period as number) || 20
+            );
+            indicators[name] = {
+              value: ema[ema.length - 1].value as number
+            };
+            break;
+          }
+        }
+      }
+
+      return indicators;
     } catch (error) {
       console.error('Error calculating indicators:', error);
       throw error;
     }
   }
 
-  private evaluateCondition(condition: string, context: any): boolean {
+  private evaluateCondition(
+    condition: StrategyCondition,
+    currentValue: number,
+    targetValue: number,
+    previousValue?: number,
+    previousTargetValue?: number
+  ): boolean {
+    switch (condition.comparison) {
+      case 'above':
+        return currentValue > targetValue;
+      case 'below':
+        return currentValue < targetValue;
+      case 'crosses_above':
+        return (
+          previousValue !== undefined &&
+          previousTargetValue !== undefined &&
+          previousValue <= previousTargetValue &&
+          currentValue > targetValue
+        );
+      case 'crosses_below':
+        return (
+          previousValue !== undefined &&
+          previousTargetValue !== undefined &&
+          previousValue >= previousTargetValue &&
+          currentValue < targetValue
+        );
+      default:
+        return false;
+    }
+  }
+
+  private getIndicatorValue(
+    indicator: string,
+    context: IndicatorValues
+  ): number | undefined {
+    const value = context[indicator];
+    if (typeof value === 'number') {
+      return value;
+    } else if (value && typeof value === 'object') {
+      if ('value' in value) return value.value;
+      if ('middle' in value) return value.middle;
+    }
+    return undefined;
+  }
+
+  private processTradeLogic(
+    trade: LiveTradeStatus,
+    klineData: KlineData
+  ): void {
     try {
-      // Koşulu parçalara ayır
-      const parts = condition.split(' ');
-      if (parts.length !== 3) {
-        console.error('Invalid condition format:', condition);
-        return false;
-      }
+      const currentIndicators = this.calculateIndicators(
+        trade.klines,
+        trade.strategy
+      );
+      const previousIndicators = trade.currentIndicators;
+      trade.previousIndicators = previousIndicators;
+      trade.currentIndicators = currentIndicators;
 
-      const [indicator, operator, value] = parts;
-      const indicatorValue = context[indicator];
-      const targetValue = parseFloat(value);
+      const context = {
+        ...currentIndicators,
+        price: klineData.close,
+        open: klineData.open,
+        high: klineData.high,
+        low: klineData.low,
+        close: klineData.close,
+        volume: klineData.volume
+      };
 
-      if (typeof indicatorValue !== 'number' || isNaN(targetValue)) {
-        console.error('Invalid values for comparison:', {
-          indicator,
-          value: indicatorValue,
-          target: targetValue
-        });
-        return false;
-      }
+      if (this.position.inPosition) {
+        const stopLossPrice =
+          this.position.entryPrice *
+          (1 - trade.strategy.riskManagement.stopLoss / 100);
+        const takeProfitPrice =
+          this.position.entryPrice *
+          (1 + trade.strategy.riskManagement.takeProfit / 100);
 
-      // Debug log
-      console.log('Condition evaluation:', {
-        indicator,
-        operator,
-        currentValue: indicatorValue,
-        targetValue,
-        context
-      });
+        const shouldExit =
+          klineData.close <= stopLossPrice ||
+          klineData.close >= takeProfitPrice ||
+          trade.strategy.exitConditions.some((condition) => {
+            const currentValue = this.getIndicatorValue(
+              condition.indicator,
+              currentIndicators
+            );
+            const targetValue = condition.targetIndicator
+              ? this.getIndicatorValue(
+                  condition.targetIndicator,
+                  currentIndicators
+                )
+              : Number(condition.value);
+            const previousValue = previousIndicators
+              ? this.getIndicatorValue(condition.indicator, previousIndicators)
+              : undefined;
+            const previousTargetValue =
+              previousIndicators && condition.targetIndicator
+                ? this.getIndicatorValue(
+                    condition.targetIndicator,
+                    previousIndicators
+                  )
+                : undefined;
 
-      switch (operator) {
-        case 'below':
-          return indicatorValue < targetValue;
-        case 'above':
-          return indicatorValue > targetValue;
-        default:
-          console.error('Unknown operator:', operator);
-          return false;
+            return (
+              currentValue !== undefined &&
+              targetValue !== undefined &&
+              this.evaluateCondition(
+                condition,
+                currentValue,
+                targetValue,
+                previousValue,
+                previousTargetValue
+              )
+            );
+          });
+
+        if (shouldExit) {
+          this.executeExit(Date.now(), klineData.close);
+          this.updateTradeStatus(trade.strategyId);
+        }
+      } else {
+        const shouldEnter = trade.strategy.entryConditions.every(
+          (condition) => {
+            const currentValue = this.getIndicatorValue(
+              condition.indicator,
+              currentIndicators
+            );
+            const targetValue = condition.targetIndicator
+              ? this.getIndicatorValue(
+                  condition.targetIndicator,
+                  currentIndicators
+                )
+              : Number(condition.value);
+            const previousValue = previousIndicators
+              ? this.getIndicatorValue(condition.indicator, previousIndicators)
+              : undefined;
+            const previousTargetValue =
+              previousIndicators && condition.targetIndicator
+                ? this.getIndicatorValue(
+                    condition.targetIndicator,
+                    previousIndicators
+                  )
+                : undefined;
+
+            return (
+              currentValue !== undefined &&
+              targetValue !== undefined &&
+              this.evaluateCondition(
+                condition,
+                currentValue,
+                targetValue,
+                previousValue,
+                previousTargetValue
+              )
+            );
+          }
+        );
+
+        if (shouldEnter) {
+          const stopLossPrice =
+            klineData.close *
+            (1 - trade.strategy.riskManagement.stopLoss / 100);
+          const riskPerTrade = this.currentBalance * 0.01;
+          const riskPerUnit = klineData.close - stopLossPrice;
+          const quantity = Math.min(
+            riskPerTrade / riskPerUnit,
+            (this.currentBalance *
+              trade.strategy.riskManagement.maxPositionSize) /
+              100 /
+              klineData.close
+          );
+
+          if (quantity > 0) {
+            this.executeEntry(Date.now(), klineData.close, quantity);
+            this.updateTradeStatus(trade.strategyId);
+          }
+        }
       }
     } catch (error) {
-      console.error('Error evaluating condition:', error);
-      return false;
+      console.error('Error in trade logic:', error);
+      trade.lastError =
+        error instanceof Error ? error.message : 'Unknown error in trade logic';
     }
   }
 
@@ -573,123 +818,6 @@ export class LiveTradingService extends TradingCore {
         error instanceof Error
           ? error.message
           : 'Unknown error updating status';
-    }
-  }
-
-  private processTradeLogic(
-    trade: LiveTradeStatus,
-    strategy: LiveTradingStrategy,
-    klineData: KlineData
-  ): void {
-    try {
-      const indicators = this.calculateIndicators(trade.klines);
-      trade.currentIndicators = indicators;
-
-      // Update running time
-      trade.performance.runningTimeMs = Date.now() - trade.startTime;
-
-      // Create evaluation context
-      const context = {
-        close: klineData.close,
-        open: klineData.open,
-        high: klineData.high,
-        low: klineData.low,
-        volume: klineData.volume,
-        rsi: indicators.rsi,
-        macd: indicators.macd.value,
-        macd_signal: indicators.macd.signal,
-        macd_histogram: indicators.macd.histogram,
-        prev_close:
-          trade.klines[trade.klines.length - 2]?.close || klineData.close
-      };
-
-      // Trading logic
-      if (this.position.inPosition) {
-        this.checkExitConditions(trade, strategy, context, klineData);
-      } else {
-        this.checkEntryConditions(trade, strategy, context, klineData);
-      }
-    } catch (error) {
-      console.error('Error in trade logic:', error);
-      trade.lastError =
-        error instanceof Error ? error.message : 'Unknown error in trade logic';
-    }
-  }
-
-  private checkExitConditions(
-    trade: LiveTradeStatus,
-    strategy: LiveTradingStrategy,
-    context: any,
-    klineData: KlineData
-  ): void {
-    const stopLossPrice =
-      this.position.entryPrice * (1 - strategy.riskManagement.stopLoss / 100);
-    const takeProfitPrice =
-      this.position.entryPrice * (1 + strategy.riskManagement.takeProfit / 100);
-
-    const shouldExit =
-      klineData.close <= stopLossPrice ||
-      klineData.close >= takeProfitPrice ||
-      this.evaluateCondition(strategy.rules.sell, context);
-
-    if (shouldExit) {
-      this.executeExit(Date.now(), klineData.close);
-      this.updateTradeStatus(trade.strategyId);
-
-      const lastTrade = this.trades[this.trades.length - 1];
-      console.log(
-        `[${trade.symbol}] SELL at ${klineData.close} (Candle Close)`,
-        {
-          profit: lastTrade.profit.toFixed(2),
-          balance: this.currentBalance.toFixed(2),
-          reason:
-            klineData.close <= stopLossPrice
-              ? 'Stop Loss'
-              : klineData.close >= takeProfitPrice
-              ? 'Take Profit'
-              : 'Exit Signal',
-          indicators: trade.currentIndicators
-        }
-      );
-    }
-  }
-
-  private checkEntryConditions(
-    trade: LiveTradeStatus,
-    strategy: LiveTradingStrategy,
-    context: any,
-    klineData: KlineData
-  ): void {
-    const shouldEnter = this.evaluateCondition(strategy.rules.buy, context);
-
-    if (shouldEnter) {
-      const stopLossPrice =
-        klineData.close * (1 - strategy.riskManagement.stopLoss / 100);
-      const riskPerTrade = this.currentBalance * 0.01;
-      const riskPerUnit = klineData.close - stopLossPrice;
-      const quantity = Math.min(
-        riskPerTrade / riskPerUnit,
-        (this.currentBalance * strategy.riskManagement.maxPositionSize) /
-          100 /
-          klineData.close
-      );
-
-      if (quantity > 0) {
-        this.executeEntry(Date.now(), klineData.close, quantity);
-        this.updateTradeStatus(trade.strategyId);
-
-        console.log(
-          `[${trade.symbol}] BUY at ${klineData.close} (Candle Close)`,
-          {
-            quantity,
-            stopLoss: stopLossPrice,
-            takeProfit:
-              klineData.close * (1 + strategy.riskManagement.takeProfit / 100),
-            balance: this.currentBalance,
-            indicators: trade.currentIndicators
-          }
-        );
-      }
     }
   }
 }

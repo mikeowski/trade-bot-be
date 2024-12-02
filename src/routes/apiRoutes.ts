@@ -157,17 +157,9 @@ router.post('/live-trading', async (req, res) => {
       });
     }
 
-    // Add timeframe to strategy configuration
-    const strategyWithTimeframe: Strategy & { timeframe?: string } = {
-      ...strategy,
+    const tradeId = await tradingService.startLiveTrading(strategyId, symbol, {
       timeframe: timeframe || '1m' // Default to 1m if not specified
-    };
-
-    const tradeId = await tradingService.startLiveTrading(
-      strategyId,
-      symbol,
-      strategyWithTimeframe
-    );
+    });
 
     res.json({
       success: true,
@@ -228,15 +220,20 @@ router.get('/live-trading/:tradeId/debug', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Trade not found' });
     }
 
+    const rsiValue =
+      typeof status.currentIndicators.rsi === 'number'
+        ? status.currentIndicators.rsi
+        : status.currentIndicators.rsi?.value || 0;
+
     const debugInfo = {
       ...status,
       evaluationContext: {
-        rsi: status.currentIndicators.rsi,
+        rsi: rsiValue,
         price: status.currentIndicators.price,
         entryCondition: 'rsi below 80',
         exitCondition: 'rsi above 95',
-        shouldEnter: status.currentIndicators.rsi < 80,
-        shouldExit: status.currentIndicators.rsi > 95,
+        shouldEnter: rsiValue < 80,
+        shouldExit: rsiValue > 95,
         lastCheck: new Date().toISOString(),
         inPosition: status.position.inPosition,
         currentBalance: status.currentBalance

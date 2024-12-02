@@ -14,10 +14,6 @@ interface RiskParameters {
   takeProfitPercentage: number;
 }
 
-interface LiveTradingParams extends Strategy {
-  timeframe?: string;
-}
-
 export class TradingService {
   private portfolioManager: PortfolioManager;
   private liveTradingService: LiveTradingService;
@@ -77,7 +73,6 @@ export class TradingService {
         );
       }
 
-      // İndikatörleri hesapla
       const rsi = TechnicalIndicators.calculateRSI(historicalData, 14);
       const macd = TechnicalIndicators.calculateMACD(historicalData, 12, 26, 9);
       const bollinger = TechnicalIndicators.calculateBollingerBands(
@@ -148,32 +143,29 @@ export class TradingService {
   async startLiveTrading(
     strategyId: string,
     symbol: string,
-    strategy: Strategy & { timeframe?: string }
-  ) {
-    // Strateji koşullarını LiveTradingStrategy formatına dönüştür
-    const liveTradingStrategy = {
-      rules: {
-        buy: strategy.entryConditions
-          .map(
-            (condition) =>
-              `${condition.indicator} ${condition.comparison} ${condition.value}`
-          )
-          .join(' && '),
-        sell: strategy.exitConditions
-          .map(
-            (condition) =>
-              `${condition.indicator} ${condition.comparison} ${condition.value}`
-          )
-          .join(' && ')
-      },
-      riskManagement: strategy.riskManagement,
-      timeframe: strategy.timeframe
+    options: { timeframe?: string }
+  ): Promise<string> {
+    if (!strategyId || !symbol) {
+      throw new Error('Missing required parameters for live trading');
+    }
+
+    // Get strategy configuration
+    const strategy = await this.strategyManager.getStrategy(strategyId);
+    if (!strategy) {
+      throw new Error('Strategy not found');
+    }
+
+    // Combine strategy configuration with timeframe
+    const completeStrategy: Strategy & { timeframe?: string } = {
+      ...strategy,
+      timeframe: options.timeframe || '1m'
     };
 
+    // Start live trading with complete strategy configuration
     return this.liveTradingService.startLiveTrade(
       strategyId,
       symbol,
-      liveTradingStrategy
+      completeStrategy
     );
   }
 
@@ -199,7 +191,6 @@ export class TradingService {
     startTime: number,
     endTime: number
   ) {
-    // Validate parameters
     if (!strategyId || !symbol || !timeframe || !startTime || !endTime) {
       throw new Error('Missing required parameters for backtesting');
     }
@@ -208,13 +199,11 @@ export class TradingService {
       throw new Error('End time must be greater than start time');
     }
 
-    // Get strategy configuration
     const strategy = await this.strategyManager.getStrategy(strategyId);
     if (!strategy) {
       throw new Error('Strategy not found');
     }
 
-    // Get historical data
     const historicalData = await getHistoricalData(
       symbol,
       timeframe,
@@ -227,7 +216,6 @@ export class TradingService {
     }
 
     try {
-      // Run backtest
       const result = await this.backtestingService.runBacktest(historicalData, {
         indicators: strategy.indicators,
         entryConditions: strategy.entryConditions,
@@ -235,9 +223,7 @@ export class TradingService {
         riskManagement: strategy.riskManagement
       });
 
-      // Store backtest result
       await this.strategyManager.saveBacktestResult(strategyId, result);
-
       return result;
     } catch (error) {
       console.error('Backtest error:', error);
@@ -250,34 +236,5 @@ export class TradingService {
       throw new Error('Strategy ID is required to get backtest result');
     }
     return this.strategyManager.getBacktestResult(strategyId);
-  }
-
-  private formatCondition(condition: any): string {
-    const indicatorRef =
-      condition.indicator === 'close' ? 'close' : condition.indicator;
-
-    const operator = this.getComparisonOperator(condition.comparison);
-    const value = condition.targetIndicator
-      ? `${condition.targetIndicator}`
-      : condition.value;
-
-    return `this.${indicatorRef} ${operator} ${value}`;
-  }
-
-  private getComparisonOperator(comparison: string): string {
-    switch (comparison) {
-      case 'above':
-        return '>';
-      case 'below':
-        return '<';
-      case 'crosses_above':
-        return '<= this.prev_${indicatorRef} && >'; // Check previous value was below/equal and current is above
-      case 'crosses_below':
-        return '>= this.prev_${indicatorRef} && <'; // Check previous value was above/equal and current is below
-      case 'equals':
-        return '==';
-      default:
-        return '==';
-    }
   }
 }

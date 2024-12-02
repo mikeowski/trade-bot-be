@@ -9,7 +9,7 @@ interface IndicatorConfig {
   };
 }
 
-type IndicatorType =
+export type IndicatorType =
   | 'rsi'
   | 'macd'
   | 'macd_signal'
@@ -18,7 +18,7 @@ type IndicatorType =
   | 'sma'
   | 'ema';
 
-interface StrategyCondition {
+export interface StrategyCondition {
   indicator: IndicatorType;
   comparison: 'above' | 'below' | 'crosses_above' | 'crosses_below';
   value: number | string;
