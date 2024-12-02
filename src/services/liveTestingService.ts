@@ -820,4 +820,10 @@ export class LiveTradingService extends TradingCore {
           : 'Unknown error updating status';
     }
   }
+
+  getAllActiveTrades() {
+    return Array.from(this.liveTrades.values())?.filter(
+      (x) => x.status == 'running'
+    );
+  }
 }

@@ -247,6 +247,17 @@ router.get('/live-trading/:tradeId/debug', async (req, res) => {
   }
 });
 
+// Active trades
+router.get('/active-trades', async (req, res) => {
+  try {
+    const activeTrades = await tradingService.getAllLiveTrades();
+    res.json({ success: true, activeTrades });
+  } catch (error) {
+    console.error('Error getting active trades:', error);
+    res.status(500).json({ success: false, error: handleError(error) });
+  }
+});
+
 // Historical data endpoint ekleyelim
 router.get('/historical-data', async (req, res) => {
   try {

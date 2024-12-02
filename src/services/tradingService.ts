@@ -237,4 +237,8 @@ export class TradingService {
     }
     return this.strategyManager.getBacktestResult(strategyId);
   }
+
+  getAllLiveTrades() {
+    return this.liveTradingService.getAllActiveTrades();
+  }
 }
