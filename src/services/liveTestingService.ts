@@ -826,4 +826,16 @@ export class LiveTradingService extends TradingCore {
       (x) => x.status == 'running'
     );
   }
+
+  updateStrategy(tradeId: string, newStrategy: Strategy): boolean {
+    const trade = this.liveTrades.get(tradeId);
+    if (!trade) {
+      return false;
+    }
+
+    // Update the strategy
+    trade.strategy = newStrategy;
+
+    return true;
+  }
 }

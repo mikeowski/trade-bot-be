@@ -415,4 +415,42 @@ router.get('/test-indicators/:symbol', async (req, res) => {
   }
 });
 
+// Add new endpoint to update live trading strategy
+router.put('/live-trading/:tradeId/strategy', async (req, res) => {
+  try {
+    const { tradeId } = req.params;
+    const { strategyId } = req.body;
+
+    if (!strategyId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Strategy ID is required'
+      });
+    }
+
+    const success = await tradingService.updateLiveTradingStrategy(
+      tradeId,
+      strategyId
+    );
+
+    if (!success) {
+      return res.status(404).json({
+        success: false,
+        error: 'Trade not found or strategy update failed'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Live trading strategy updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating live trading strategy:', error);
+    res.status(500).json({
+      success: false,
+      error: handleError(error)
+    });
+  }
+});
+
 export default router;
