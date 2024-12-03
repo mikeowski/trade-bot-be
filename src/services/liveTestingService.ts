@@ -1,10 +1,10 @@
-import WebSocket from 'ws';
-import { TradingCore, TradeMetrics } from './tradingCore';
-import { TechnicalIndicators, KlineData } from './indicatorService';
-import { EventEmitter } from 'events';
-import { getHistoricalData } from './priceService';
-import { Strategy, StrategyCondition, IndicatorType } from './strategyService';
-import { RiskManagementService } from './riskManagementService';
+import WebSocket from "ws";
+import { TradingCore, TradeMetrics } from "./tradingCore";
+import { TechnicalIndicators, KlineData } from "./indicatorService";
+import { EventEmitter } from "events";
+import { getHistoricalData } from "./priceService";
+import { Strategy, StrategyCondition, IndicatorType } from "./strategyService";
+import { RiskManagementService } from "./riskManagementService";
 
 // Dinamik indikatör değerleri için interface güncellendi
 interface IndicatorValues {
@@ -24,14 +24,14 @@ interface IndicatorValues {
 interface LiveTradeStatus {
   strategyId: string;
   symbol: string;
-  status: 'running' | 'stopped';
+  status: "running" | "stopped";
   startTime: number;
   currentIndicators: IndicatorValues;
   position: {
     inPosition: boolean;
     entryPrice: number;
     quantity: number;
-    side: 'long' | 'short';
+    side: "long" | "short";
   };
   performance: {
     totalTrades: number;
@@ -95,30 +95,30 @@ export class LiveTradingService extends TradingCore {
 
   private getValidTimeframe(timeframe: string): string {
     const validTimeframes = [
-      '1s', // 1 second
-      '1m',
-      '3m',
-      '5m',
-      '15m',
-      '30m', // minutes
-      '1h',
-      '2h',
-      '4h',
-      '6h',
-      '8h',
-      '12h', // hours
-      '1d',
-      '3d', // days
-      '1w', // week
-      '1M' // month
+      "1s", // 1 second
+      "1m",
+      "3m",
+      "5m",
+      "15m",
+      "30m", // minutes
+      "1h",
+      "2h",
+      "4h",
+      "6h",
+      "8h",
+      "12h", // hours
+      "1d",
+      "3d", // days
+      "1w", // week
+      "1M", // month
     ];
 
     const tf = timeframe.toLowerCase();
     if (!validTimeframes.includes(tf)) {
       throw new Error(
         `Invalid timeframe: ${timeframe}. Valid timeframes are: ${validTimeframes.join(
-          ', '
-        )}`
+          ", ",
+        )}`,
       );
     }
 
@@ -128,45 +128,45 @@ export class LiveTradingService extends TradingCore {
   private setupWebSocket(
     tradeId: string,
     symbol: string,
-    strategy: LiveTradingStrategy
+    strategy: LiveTradingStrategy,
   ): WebSocket {
     // Bağlantı limiti kontrolü
     const now = Date.now();
     if (this.connectionAttempts.length >= this.MAX_CONNECTIONS) {
       throw new Error(
         `Connection limit exceeded. Please wait ${Math.ceil(
-          (this.CONNECTION_WINDOW - (now - this.connectionAttempts[0])) / 1000
-        )} seconds.`
+          (this.CONNECTION_WINDOW - (now - this.connectionAttempts[0])) / 1000,
+        )} seconds.`,
       );
     }
     this.connectionAttempts.push(now);
 
-    const timeframe = this.getValidTimeframe(strategy.timeframe || '1m');
+    const timeframe = this.getValidTimeframe(strategy.timeframe || "1m");
 
     // Use combined stream with both base endpoints for redundancy
     const wsEndpoints = [
       `wss://stream.binance.com:9443`,
-      `wss://stream.binance.com:443`
+      `wss://stream.binance.com:443`,
     ];
 
     // Try primary endpoint first, fallback to secondary
     const ws = new WebSocket(
       `${
         wsEndpoints[0]
-      }/stream?streams=${symbol.toLowerCase()}@kline_${timeframe}/${symbol.toLowerCase()}@trade`
+      }/stream?streams=${symbol.toLowerCase()}@kline_${timeframe}/${symbol.toLowerCase()}@trade`,
     );
 
-    ws.on('open', () => {
+    ws.on("open", () => {
       console.log(`[${symbol}] WebSocket connection established`);
 
       // Subscribe to streams with proper ID
       const subscribeMessage = {
-        method: 'SUBSCRIBE',
+        method: "SUBSCRIBE",
         params: [
           `${symbol.toLowerCase()}@kline_${timeframe}`,
-          `${symbol.toLowerCase()}@trade`
+          `${symbol.toLowerCase()}@trade`,
         ],
-        id: Date.now()
+        id: Date.now(),
       };
       ws.send(JSON.stringify(subscribeMessage));
     });
@@ -177,24 +177,27 @@ export class LiveTradingService extends TradingCore {
       clearTimeout(pingTimeout);
 
       // Disconnect if no pong received within 10 minutes
-      pingTimeout = setTimeout(() => {
-        console.log(`[${symbol}] WebSocket connection timed out`);
-        ws.terminate();
-      }, 10 * 60 * 1000);
+      pingTimeout = setTimeout(
+        () => {
+          console.log(`[${symbol}] WebSocket connection timed out`);
+          ws.terminate();
+        },
+        10 * 60 * 1000,
+      );
     };
 
-    ws.on('ping', (data) => {
+    ws.on("ping", (data) => {
       ws.pong(data); // Echo back ping payload
       heartbeat();
     });
 
-    ws.on('pong', heartbeat);
+    ws.on("pong", heartbeat);
 
     // Start heartbeat on connection
     heartbeat();
 
     // Handle incoming messages with proper rate limiting
-    ws.on('message', (data) => {
+    ws.on("message", (data) => {
       try {
         // Check rate limits before processing
         if (this.isRateLimited(tradeId)) {
@@ -211,20 +214,20 @@ export class LiveTradingService extends TradingCore {
 
         // Handle stream data
         if (!message.data) {
-          console.warn('Received malformed message:', message);
+          console.warn("Received malformed message:", message);
           return;
         }
 
         const streamData = message.data;
 
         // Process kline data
-        if (streamData.e === 'kline') {
+        if (streamData.e === "kline") {
           const klineData = TechnicalIndicators.parseWebSocketKline(
-            streamData.k
+            streamData.k,
           );
           const trade = this.liveTrades.get(tradeId);
 
-          if (!trade || trade.status !== 'running') return;
+          if (!trade || trade.status !== "running") return;
 
           // Mum kapanışlarında işlem yap
           if (streamData.k.x) {
@@ -249,7 +252,7 @@ export class LiveTradingService extends TradingCore {
               if (tempKlines.length >= 50) {
                 const indicators = this.calculateIndicators(
                   tempKlines,
-                  trade.strategy
+                  trade.strategy,
                 );
                 trade.currentIndicators = indicators;
               }
@@ -257,12 +260,12 @@ export class LiveTradingService extends TradingCore {
           }
         }
       } catch (error) {
-        console.error('Error processing WebSocket message:', error);
+        console.error("Error processing WebSocket message:", error);
       }
     });
 
     // Enhanced error handling
-    ws.on('error', (error) => {
+    ws.on("error", (error) => {
       console.error(`[${symbol}] WebSocket error:`, error);
       clearTimeout(pingTimeout);
 
@@ -275,13 +278,13 @@ export class LiveTradingService extends TradingCore {
       this.handleReconnection(tradeId, symbol, strategy);
     });
 
-    ws.on('close', () => {
+    ws.on("close", () => {
       console.log(`[${symbol}] WebSocket connection closed`);
       clearTimeout(pingTimeout);
 
       // Attempt reconnection on close if trade is still running
       const trade = this.liveTrades.get(tradeId);
-      if (trade && trade.status === 'running') {
+      if (trade && trade.status === "running") {
         this.handleReconnection(tradeId, symbol, strategy);
       }
     });
@@ -293,14 +296,14 @@ export class LiveTradingService extends TradingCore {
   private handleReconnection(
     tradeId: string,
     symbol: string,
-    strategy: LiveTradingStrategy
+    strategy: LiveTradingStrategy,
   ): void {
     const currentAttempt = this.reconnectAttempts.get(tradeId) || 0;
 
     // Implement exponential backoff with max delay
     const delay = Math.min(
       this.RECONNECT_DELAY * Math.pow(2, currentAttempt),
-      this.MAX_RECONNECT_DELAY
+      this.MAX_RECONNECT_DELAY,
     );
 
     this.reconnectAttempts.set(tradeId, currentAttempt + 1);
@@ -308,7 +311,7 @@ export class LiveTradingService extends TradingCore {
     console.log(
       `[${symbol}] Attempting reconnection in ${delay / 1000}s (attempt ${
         currentAttempt + 1
-      }/${this.MAX_RECONNECT_ATTEMPTS})`
+      }/${this.MAX_RECONNECT_ATTEMPTS})`,
     );
 
     setTimeout(() => {
@@ -323,7 +326,7 @@ export class LiveTradingService extends TradingCore {
 
     // Keep only messages within the last second
     const recentMessages = messages.filter(
-      (time) => now - time < this.MESSAGE_WINDOW
+      (time) => now - time < this.MESSAGE_WINDOW,
     );
 
     // Check against Binance's 5 messages per second limit
@@ -342,15 +345,15 @@ export class LiveTradingService extends TradingCore {
   private async reconnectWebSocket(
     tradeId: string,
     symbol: string,
-    strategy: LiveTradingStrategy
+    strategy: LiveTradingStrategy,
   ): Promise<void> {
     const trade = this.liveTrades.get(tradeId);
     if (!trade) return;
 
     const currentAttempt = this.reconnectAttempts.get(tradeId) || 0;
     if (currentAttempt > this.MAX_RECONNECT_ATTEMPTS) {
-      trade.status = 'stopped';
-      trade.lastError = 'Max reconnection attempts reached';
+      trade.status = "stopped";
+      trade.lastError = "Max reconnection attempts reached";
       this.reconnectAttempts.delete(tradeId);
       return;
     }
@@ -368,7 +371,7 @@ export class LiveTradingService extends TradingCore {
 
   private async initializeHistoricalData(
     symbol: string,
-    timeframe: string
+    timeframe: string,
   ): Promise<KlineData[]> {
     try {
       // Son 100 mumu al (50 minimum gerekli, 100 alarak buffer bırakıyoruz)
@@ -380,7 +383,7 @@ export class LiveTradingService extends TradingCore {
         symbol,
         timeframe,
         startTime,
-        endTime
+        endTime,
       );
 
       // Convert to KlineData format
@@ -391,11 +394,11 @@ export class LiveTradingService extends TradingCore {
         low: candle.low,
         close: candle.close,
         volume: candle.volume,
-        closeTime: candle.time + this.getTimeframeInMs(timeframe)
+        closeTime: candle.time + this.getTimeframeInMs(timeframe),
       }));
     } catch (error) {
-      console.error('Error fetching historical data:', error);
-      throw new Error('Failed to initialize historical data');
+      console.error("Error fetching historical data:", error);
+      throw new Error("Failed to initialize historical data");
     }
   }
 
@@ -404,17 +407,17 @@ export class LiveTradingService extends TradingCore {
     const value = parseInt(timeframe.slice(0, -1));
 
     switch (unit) {
-      case 's':
+      case "s":
         return value * 1000;
-      case 'm':
+      case "m":
         return value * 60 * 1000;
-      case 'h':
+      case "h":
         return value * 60 * 60 * 1000;
-      case 'd':
+      case "d":
         return value * 24 * 60 * 60 * 1000;
-      case 'w':
+      case "w":
         return value * 7 * 24 * 60 * 60 * 1000;
-      case 'M':
+      case "M":
         return value * 30 * 24 * 60 * 60 * 1000;
       default:
         throw new Error(`Invalid timeframe unit: ${unit}`);
@@ -424,14 +427,14 @@ export class LiveTradingService extends TradingCore {
   async startLiveTrade(
     strategyId: string,
     symbol: string,
-    strategy: Strategy & { timeframe?: string }
+    strategy: Strategy & { timeframe?: string },
   ): Promise<string> {
     if (!strategyId || !symbol || !strategy) {
-      throw new Error('Missing required parameters for live trading');
+      throw new Error("Missing required parameters for live trading");
     }
 
     // Validate timeframe before starting
-    const timeframe = strategy.timeframe || '1m';
+    const timeframe = strategy.timeframe || "1m";
     this.getValidTimeframe(timeframe);
 
     const tradeId = `${strategyId}-${Date.now()}`;
@@ -441,23 +444,23 @@ export class LiveTradingService extends TradingCore {
       // Get historical data first
       const historicalKlines = await this.initializeHistoricalData(
         symbol,
-        timeframe
+        timeframe,
       );
 
       // Initialize trade status with historical data
       const tradeStatus: LiveTradeStatus = {
         strategyId,
         symbol,
-        status: 'running',
+        status: "running",
         startTime,
         currentIndicators: {
           rsi: 0,
           macd: {
             value: 0,
             signal: 0,
-            histogram: 0
+            histogram: 0,
           },
-          price: historicalKlines[historicalKlines.length - 1]?.close || 0
+          price: historicalKlines[historicalKlines.length - 1]?.close || 0,
         },
         position: this.getPosition(),
         performance: {
@@ -466,12 +469,12 @@ export class LiveTradingService extends TradingCore {
           losingTrades: 0,
           totalProfit: 0,
           maxDrawdown: 0,
-          runningTimeMs: 0
+          runningTimeMs: 0,
         },
         currentBalance: this.getCurrentBalance(),
         trades: this.getTrades(),
         klines: historicalKlines,
-        strategy: strategy
+        strategy: strategy,
       };
 
       this.liveTrades.set(tradeId, tradeStatus);
@@ -488,11 +491,11 @@ export class LiveTradingService extends TradingCore {
       this.websockets.set(tradeId, ws);
 
       console.log(
-        `[${symbol}] Live trade started with ${historicalKlines.length} historical candles`
+        `[${symbol}] Live trade started with ${historicalKlines.length} historical candles`,
       );
       return tradeId;
     } catch (error) {
-      console.error('Error starting live trade:', error);
+      console.error("Error starting live trade:", error);
       throw error;
     }
   }
@@ -515,7 +518,7 @@ export class LiveTradingService extends TradingCore {
 
     const trade = this.liveTrades.get(tradeId);
     if (trade) {
-      trade.status = 'stopped';
+      trade.status = "stopped";
       // Close any open position
       if (trade.position.inPosition) {
         this.executeExit(Date.now(), trade.currentIndicators.price);
@@ -535,70 +538,70 @@ export class LiveTradingService extends TradingCore {
 
   private calculateIndicators(
     klines: KlineData[],
-    strategy: Strategy
+    strategy: Strategy,
   ): IndicatorValues {
     try {
       // Initialize with required price field
       const indicators: IndicatorValues = {
-        price: klines[klines.length - 1].close
+        price: klines[klines.length - 1].close,
       };
 
       for (const [name, config] of Object.entries(strategy.indicators)) {
         switch (config.type.toLowerCase()) {
-          case 'rsi': {
+          case "rsi": {
             const rsi = TechnicalIndicators.calculateRSI(
               klines,
-              (config.params.period as number) || 14
+              (config.params.period as number) || 14,
             );
             indicators[name] = rsi[rsi.length - 1].value;
             break;
           }
-          case 'macd': {
+          case "macd": {
             const macd = TechnicalIndicators.calculateMACD(
               klines,
               (config.params.fastPeriod as number) || 12,
               (config.params.slowPeriod as number) || 26,
-              (config.params.signalPeriod as number) || 9
+              (config.params.signalPeriod as number) || 9,
             );
             const latest = macd[macd.length - 1];
             indicators[name] = {
               value: latest.value[0],
               signal: latest.value[1],
-              histogram: latest.value[2]
+              histogram: latest.value[2],
             };
             break;
           }
-          case 'bollinger': {
+          case "bollinger": {
             const bb = TechnicalIndicators.calculateBollingerBands(
               klines,
               (config.params.period as number) || 20,
-              (config.params.stdDev as number) || 2
+              (config.params.stdDev as number) || 2,
             );
             indicators[name] = {
               value: bb.middle[bb.middle.length - 1], // Ana değer olarak middle band'i kullan
               upper: bb.upper[bb.upper.length - 1],
               middle: bb.middle[bb.middle.length - 1],
-              lower: bb.lower[bb.lower.length - 1]
+              lower: bb.lower[bb.lower.length - 1],
             };
             break;
           }
-          case 'sma': {
+          case "sma": {
             const sma = TechnicalIndicators.calculateSMA(
               klines,
-              (config.params.period as number) || 20
+              (config.params.period as number) || 20,
             );
             indicators[name] = {
-              value: sma[sma.length - 1].value as number
+              value: sma[sma.length - 1].value as number,
             };
             break;
           }
-          case 'ema': {
+          case "ema": {
             const ema = TechnicalIndicators.calculateEMA(
               klines,
-              (config.params.period as number) || 20
+              (config.params.period as number) || 20,
             );
             indicators[name] = {
-              value: ema[ema.length - 1].value as number
+              value: ema[ema.length - 1].value as number,
             };
             break;
           }
@@ -607,7 +610,7 @@ export class LiveTradingService extends TradingCore {
 
       return indicators;
     } catch (error) {
-      console.error('Error calculating indicators:', error);
+      console.error("Error calculating indicators:", error);
       throw error;
     }
   }
@@ -617,21 +620,21 @@ export class LiveTradingService extends TradingCore {
     currentValue: number,
     targetValue: number,
     previousValue?: number,
-    previousTargetValue?: number
+    previousTargetValue?: number,
   ): boolean {
     switch (condition.comparison) {
-      case 'above':
+      case "above":
         return currentValue > targetValue;
-      case 'below':
+      case "below":
         return currentValue < targetValue;
-      case 'crosses_above':
+      case "crosses_above":
         return (
           previousValue !== undefined &&
           previousTargetValue !== undefined &&
           previousValue <= previousTargetValue &&
           currentValue > targetValue
         );
-      case 'crosses_below':
+      case "crosses_below":
         return (
           previousValue !== undefined &&
           previousTargetValue !== undefined &&
@@ -645,26 +648,26 @@ export class LiveTradingService extends TradingCore {
 
   private getIndicatorValue(
     indicator: string,
-    context: IndicatorValues
+    context: IndicatorValues,
   ): number | undefined {
     const value = context[indicator];
-    if (typeof value === 'number') {
+    if (typeof value === "number") {
       return value;
-    } else if (value && typeof value === 'object') {
-      if ('value' in value) return value.value;
-      if ('middle' in value) return value.middle;
+    } else if (value && typeof value === "object") {
+      if ("value" in value) return value.value;
+      if ("middle" in value) return value.middle;
     }
     return undefined;
   }
 
   private processTradeLogic(
     trade: LiveTradeStatus,
-    klineData: KlineData
+    klineData: KlineData,
   ): void {
     try {
       const currentIndicators = this.calculateIndicators(
         trade.klines,
-        trade.strategy
+        trade.strategy,
       );
       const previousIndicators = trade.currentIndicators;
       trade.previousIndicators = previousIndicators;
@@ -677,7 +680,7 @@ export class LiveTradingService extends TradingCore {
         high: klineData.high,
         low: klineData.low,
         close: klineData.close,
-        volume: klineData.volume
+        volume: klineData.volume,
       };
 
       if (this.position.inPosition) {
@@ -694,12 +697,12 @@ export class LiveTradingService extends TradingCore {
           trade.strategy.exitConditions.some((condition) => {
             const currentValue = this.getIndicatorValue(
               condition.indicator,
-              currentIndicators
+              currentIndicators,
             );
             const targetValue = condition.targetIndicator
               ? this.getIndicatorValue(
                   condition.targetIndicator,
-                  currentIndicators
+                  currentIndicators,
                 )
               : Number(condition.value);
             const previousValue = previousIndicators
@@ -709,7 +712,7 @@ export class LiveTradingService extends TradingCore {
               previousIndicators && condition.targetIndicator
                 ? this.getIndicatorValue(
                     condition.targetIndicator,
-                    previousIndicators
+                    previousIndicators,
                   )
                 : undefined;
 
@@ -721,7 +724,7 @@ export class LiveTradingService extends TradingCore {
                 currentValue,
                 targetValue,
                 previousValue,
-                previousTargetValue
+                previousTargetValue,
               )
             );
           });
@@ -735,12 +738,12 @@ export class LiveTradingService extends TradingCore {
           (condition) => {
             const currentValue = this.getIndicatorValue(
               condition.indicator,
-              currentIndicators
+              currentIndicators,
             );
             const targetValue = condition.targetIndicator
               ? this.getIndicatorValue(
                   condition.targetIndicator,
-                  currentIndicators
+                  currentIndicators,
                 )
               : Number(condition.value);
             const previousValue = previousIndicators
@@ -750,7 +753,7 @@ export class LiveTradingService extends TradingCore {
               previousIndicators && condition.targetIndicator
                 ? this.getIndicatorValue(
                     condition.targetIndicator,
-                    previousIndicators
+                    previousIndicators,
                   )
                 : undefined;
 
@@ -762,10 +765,10 @@ export class LiveTradingService extends TradingCore {
                 currentValue,
                 targetValue,
                 previousValue,
-                previousTargetValue
+                previousTargetValue,
               )
             );
-          }
+          },
         );
 
         if (shouldEnter) {
@@ -779,7 +782,7 @@ export class LiveTradingService extends TradingCore {
             (this.currentBalance *
               trade.strategy.riskManagement.maxPositionSize) /
               100 /
-              klineData.close
+              klineData.close,
           );
 
           if (quantity > 0) {
@@ -789,9 +792,9 @@ export class LiveTradingService extends TradingCore {
         }
       }
     } catch (error) {
-      console.error('Error in trade logic:', error);
+      console.error("Error in trade logic:", error);
       trade.lastError =
-        error instanceof Error ? error.message : 'Unknown error in trade logic';
+        error instanceof Error ? error.message : "Unknown error in trade logic";
     }
   }
 
@@ -807,23 +810,26 @@ export class LiveTradingService extends TradingCore {
         losingTrades: metrics.losingTrades,
         totalProfit: metrics.totalProfit,
         maxDrawdown: metrics.maxDrawdown,
-        runningTimeMs: Date.now() - trade.startTime
+        runningTimeMs: Date.now() - trade.startTime,
       };
       trade.currentBalance = this.getCurrentBalance();
       trade.position = this.getPosition();
       trade.trades = this.getTrades();
     } catch (error) {
-      console.error('Error updating trade status:', error);
+      console.error("Error updating trade status:", error);
       trade.lastError =
         error instanceof Error
           ? error.message
-          : 'Unknown error updating status';
+          : "Unknown error updating status";
     }
   }
 
   getAllActiveTrades() {
-    return Array.from(this.liveTrades.values())?.filter(
-      (x) => x.status == 'running'
-    );
+    return Array.from(this.liveTrades.keys())
+      .map((tradeId) => ({
+        id: tradeId,
+        ...this.liveTrades.get(tradeId),
+      }))
+      .filter((trade) => trade.status === "running");
   }
 }
