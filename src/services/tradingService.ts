@@ -241,23 +241,4 @@ export class TradingService {
   getAllLiveTrades() {
     return this.liveTradingService.getAllActiveTrades();
   }
-
-  // Add new method to update live trading strategy
-  async updateLiveTradingStrategy(
-    tradeId: string,
-    strategyId: string
-  ): Promise<boolean> {
-    if (!tradeId || !strategyId) {
-      throw new Error('Trade ID and Strategy ID are required');
-    }
-
-    // Get the new strategy
-    const strategy = await this.strategyManager.getStrategy(strategyId);
-    if (!strategy) {
-      throw new Error('Strategy not found');
-    }
-
-    // Update the strategy in live trading service
-    return this.liveTradingService.updateStrategy(tradeId, strategy);
-  }
 }
