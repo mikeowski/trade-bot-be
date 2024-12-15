@@ -241,4 +241,8 @@ export class TradingService {
   getAllLiveTrades() {
     return this.liveTradingService.getAllActiveTrades();
   }
+
+  updateTradeStrategy(tradeId: string, newStrategyId: string) {
+    return this.liveTradingService.updateTradeStrategy(tradeId, newStrategyId);
+  }
 }

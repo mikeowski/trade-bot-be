@@ -521,5 +521,67 @@ export default function (wsInstance: Instance) {
     }
   });
 
+  // Live Trading endpoints içine yeni endpoint ekleyelim
+  router.put('/live-trading/:tradeId/strategy', async (req, res) => {
+    try {
+      const { newStrategyId } = req.body;
+      const tradeId = req.params.tradeId;
+
+      if (!newStrategyId) {
+        return res.status(400).json({
+          success: false,
+          error: 'New strategy ID is required'
+        });
+      }
+
+      // Önce yeni stratejinin var olduğunu kontrol edelim
+      const newStrategy = await strategyManager.getStrategy(newStrategyId);
+      if (!newStrategy) {
+        return res.status(404).json({
+          success: false,
+          error: 'New strategy not found'
+        });
+      }
+
+      // Trade'in aktif olduğunu kontrol edelim
+      const currentStatus = tradingService.getLiveTradingStatus(tradeId);
+      if (!currentStatus) {
+        return res.status(404).json({
+          success: false,
+          error: 'Trade not found or not active'
+        });
+      }
+
+      // Trading service'e strateji güncelleme methodu ekleyelim ve çağıralım
+      await tradingService.updateTradeStrategy(tradeId, newStrategyId);
+
+      // WebSocket clients'ları bilgilendirelim
+      const subscribers = tradeSubscriptions.get(tradeId);
+      if (subscribers) {
+        subscribers.forEach((client) => {
+          if (client.readyState === client.OPEN) {
+            client.send(
+              JSON.stringify({
+                type: 'strategy_updated',
+                message: 'Trade strategy has been updated',
+                newStrategyId
+              })
+            );
+          }
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Trade strategy updated successfully',
+        tradeId,
+        newStrategyId
+      });
+    } catch (error) {
+      console.error('Error updating trade strategy:', error);
+      res.status(500).json({ success: false, error: handleError(error) });
+    }
+  });
+
   return router;
 }
