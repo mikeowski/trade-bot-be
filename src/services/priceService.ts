@@ -1,7 +1,7 @@
-import axios from 'axios';
-import { KlineData } from './indicatorService';
+import axios from "axios";
+import { KlineData } from "./indicatorService";
 
-const API_BASE = 'https://api.binance.com/api/v3';
+const API_BASE = "https://api.binance.com/api/v3";
 const MAX_LIMIT = 1000; // Binance API limit
 
 export async function getLivePrice(symbol: string): Promise<{ price: string }> {
@@ -14,16 +14,16 @@ export async function getHistoricalData(
   interval: string,
   startTime: number,
   endTime: number,
-  limit: number = MAX_LIMIT
+  limit: number = MAX_LIMIT,
 ): Promise<KlineData[]> {
   try {
     // Validate inputs
     if (!symbol || !interval || !startTime || !endTime) {
-      throw new Error('Missing required parameters');
+      throw new Error("Missing required parameters");
     }
 
     if (endTime <= startTime) {
-      throw new Error('End time must be greater than start time');
+      throw new Error("End time must be greater than start time");
     }
 
     // Calculate time chunks if data range is large
@@ -34,7 +34,7 @@ export async function getHistoricalData(
       const chunkEnd = Math.min(
         // Her chunk için maksimum veri sayısını hesapla
         currentStart + limit * getIntervalInMs(interval),
-        endTime
+        endTime,
       );
       chunks.push({ start: currentStart, end: chunkEnd });
       currentStart = chunkEnd;
@@ -50,8 +50,8 @@ export async function getHistoricalData(
           interval,
           startTime: chunk.start,
           endTime: chunk.end,
-          limit
-        }
+          limit,
+        },
       });
 
       const chunkData = response.data.map((candle: any) => ({
@@ -65,7 +65,7 @@ export async function getHistoricalData(
         quoteVolume: parseFloat(candle[7]),
         trades: parseInt(candle[8]),
         takerBuyBaseVolume: parseFloat(candle[9]),
-        takerBuyQuoteVolume: parseFloat(candle[10])
+        takerBuyQuoteVolume: parseFloat(candle[10]),
       }));
 
       allData.push(...chunkData);
@@ -73,9 +73,11 @@ export async function getHistoricalData(
 
     return allData;
   } catch (error) {
-    console.error('Error fetching historical data:', error);
+    console.error("Error fetching historical data:", error);
     throw new Error(
-      error instanceof Error ? error.message : 'Failed to fetch historical data'
+      error instanceof Error
+        ? error.message
+        : "Failed to fetch historical data",
     );
   }
 }
@@ -85,15 +87,15 @@ export function getIntervalInMs(interval: string): number {
   const value = parseInt(interval.slice(0, -1));
 
   switch (unit) {
-    case 'm':
+    case "m":
       return value * 60 * 1000;
-    case 'h':
+    case "h":
       return value * 60 * 60 * 1000;
-    case 'd':
+    case "d":
       return value * 24 * 60 * 60 * 1000;
-    case 'w':
+    case "w":
       return value * 7 * 24 * 60 * 60 * 1000;
-    case 'M':
+    case "M":
       return value * 30 * 24 * 60 * 60 * 1000;
     default:
       throw new Error(`Invalid interval: ${interval}`);

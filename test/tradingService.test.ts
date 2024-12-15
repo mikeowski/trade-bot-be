@@ -1,9 +1,10 @@
-import { TradingService } from '../src/services/tradingService';
-import { getHistoricalData } from '../src/services/priceService';
+import { TradingService } from "../src/services/tradingService";
+import { getHistoricalData } from "../src/services/priceService";
+import { Strategy } from "../src/services/strategyService";
 
-jest.mock('../src/services/priceService');
+jest.mock("../src/services/priceService");
 
-describe('TradingService', () => {
+describe("TradingService", () => {
   let tradingService: TradingService;
 
   // Mock historical data with sufficient length
@@ -19,7 +20,7 @@ describe('TradingService', () => {
         high: price + 1,
         low: price - 1,
         close: price,
-        volume: 1000 + Math.random() * 500
+        volume: 1000 + Math.random() * 500,
       };
     });
 
@@ -29,7 +30,7 @@ describe('TradingService', () => {
     riskPerTrade: 1,
     maxDrawdown: 20,
     stopLossPercentage: 2,
-    takeProfitPercentage: 4
+    takeProfitPercentage: 4,
   };
 
   beforeEach(() => {
@@ -37,37 +38,37 @@ describe('TradingService', () => {
     (getHistoricalData as jest.Mock).mockResolvedValue(mockHistoricalData);
   });
 
-  describe('Strategy Management', () => {
-    test('Create and retrieve strategy', async () => {
-      const strategy = {
-        id: '',
-        name: 'Test Strategy',
-        description: 'Test strategy description',
+  describe("Strategy Management", () => {
+    test("Create and retrieve strategy", async () => {
+      const strategy: Strategy = {
+        id: "",
+        name: "Test Strategy",
+        description: "Test strategy description",
         indicators: {
           rsi: {
-            type: 'rsi',
-            params: { period: 14 }
-          }
+            type: "rsi",
+            params: { period: 14 },
+          },
         },
         entryConditions: [
           {
-            indicator: 'rsi',
-            comparison: 'below' as const,
-            value: 30
-          }
+            indicator: "rsi",
+            comparison: "below" as const,
+            value: 30,
+          },
         ],
         exitConditions: [
           {
-            indicator: 'rsi',
-            comparison: 'above' as const,
-            value: 70
-          }
+            indicator: "rsi",
+            comparison: "above" as const,
+            value: 70,
+          },
         ],
         riskManagement: {
           stopLoss: 2,
           takeProfit: 4,
-          maxPositionSize: 1000
-        }
+          maxPositionSize: 1000,
+        },
       };
 
       const id = await tradingService.createStrategy(strategy);
@@ -76,80 +77,80 @@ describe('TradingService', () => {
       expect(retrieved?.name).toBe(strategy.name);
     });
 
-    test('Update strategy', async () => {
+    test("Update strategy", async () => {
       const strategy = {
-        id: '',
-        name: 'Test Strategy',
-        description: 'Test strategy description',
+        id: "",
+        name: "Test Strategy",
+        description: "Test strategy description",
         indicators: {
           rsi: {
-            type: 'rsi',
-            params: { period: 14 }
-          }
+            type: "rsi",
+            params: { period: 14 },
+          },
         },
         entryConditions: [
           {
-            indicator: 'rsi',
-            comparison: 'below' as const,
-            value: 30
-          }
+            indicator: "rsi",
+            comparison: "below" as const,
+            value: 30,
+          },
         ],
         exitConditions: [
           {
-            indicator: 'rsi',
-            comparison: 'above' as const,
-            value: 70
-          }
+            indicator: "rsi",
+            comparison: "above" as const,
+            value: 70,
+          },
         ],
         riskManagement: {
           stopLoss: 2,
           takeProfit: 4,
-          maxPositionSize: 1000
-        }
+          maxPositionSize: 1000,
+        },
       };
 
       const id = await tradingService.createStrategy(strategy);
       const success = await tradingService.updateStrategy(id, {
         ...strategy,
         id,
-        name: 'Updated Strategy'
+        name: "Updated Strategy",
       });
 
       expect(success).toBe(true);
       const updated = await tradingService.getStrategy(id);
-      expect(updated?.name).toBe('Updated Strategy');
+      expect(updated?.name).toBe("Updated Strategy");
     });
 
-    test('Delete strategy', async () => {
+    test("Delete strategy", async () => {
       const strategy = {
-        id: '',
-        name: 'Test Strategy',
-        description: 'Test strategy description',
+        id: "",
+        name: "Test Strategy",
+        description: "Test strategy description",
         indicators: {
           rsi: {
-            type: 'rsi',
-            params: { period: 14 }
-          }
+            type: "rsi",
+            params: { period: 14 },
+          },
         },
         entryConditions: [
           {
-            indicator: 'rsi',
-            comparison: 'below' as const,
-            value: 30
-          }
+            indicator: "rsi",
+            comparison: "below" as const,
+            value: 30,
+          },
         ],
         exitConditions: [
           {
-            indicator: 'rsi',
-            comparison: 'above' as const,
-            value: 70
-          }
+            indicator: "rsi",
+            comparison: "above" as const,
+            value: 70,
+          },
         ],
         riskManagement: {
           stopLoss: 2,
           takeProfit: 4,
-          maxPositionSize: 1000
-        }
+          maxPositionSize: 1000,
+        },
       };
 
       const id = await tradingService.createStrategy(strategy);
@@ -160,13 +161,13 @@ describe('TradingService', () => {
     });
   });
 
-  describe('Technical Analysis', () => {
-    test('Calculate indicators', async () => {
+  describe("Technical Analysis", () => {
+    test("Calculate indicators", async () => {
       const result = await tradingService.calculateIndicators(
-        'BTCUSDT',
-        '1h',
+        "BTCUSDT",
+        "1h",
         Date.now() - 30 * 24 * 60 * 60 * 1000,
-        Date.now()
+        Date.now(),
       );
 
       expect(result).toBeDefined();
@@ -177,46 +178,46 @@ describe('TradingService', () => {
     });
   });
 
-  describe('Backtesting', () => {
-    test('Run backtest', async () => {
+  describe("Backtesting", () => {
+    test("Run backtest", async () => {
       const strategy = {
-        id: '',
-        name: 'Test Strategy',
-        description: 'Test strategy description',
+        id: "",
+        name: "Test Strategy",
+        description: "Test strategy description",
         indicators: {
           rsi: {
-            type: 'rsi',
-            params: { period: 14 }
-          }
+            type: "rsi",
+            params: { period: 14 },
+          },
         },
         entryConditions: [
           {
-            indicator: 'rsi',
-            comparison: 'below' as const,
-            value: 30
-          }
+            indicator: "rsi",
+            comparison: "below" as const,
+            value: 30,
+          },
         ],
         exitConditions: [
           {
-            indicator: 'rsi',
-            comparison: 'above' as const,
-            value: 70
-          }
+            indicator: "rsi",
+            comparison: "above" as const,
+            value: 70,
+          },
         ],
         riskManagement: {
           stopLoss: 2,
           takeProfit: 4,
-          maxPositionSize: 1000
-        }
+          maxPositionSize: 1000,
+        },
       };
 
       const id = await tradingService.createStrategy(strategy);
       const result = await tradingService.runBacktest(
         id,
-        'BTCUSDT',
-        '1h',
+        "BTCUSDT",
+        "1h",
         Date.now() - 30 * 24 * 60 * 60 * 1000,
-        Date.now()
+        Date.now(),
       );
 
       expect(result).toBeDefined();

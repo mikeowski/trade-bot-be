@@ -1,9 +1,9 @@
-import { TechnicalIndicators } from './indicatorService';
-import { StrategyManager, Strategy } from './strategyService';
-import { PortfolioManager } from './portfolioService';
-import { getHistoricalData, getLivePrice } from './priceService';
-import { LiveTradingService } from './liveTestingService';
-import { BacktestingService } from './backtestingService';
+import { TechnicalIndicators } from "./indicatorService";
+import { StrategyManager, Strategy } from "./strategyService";
+import { PortfolioManager } from "./portfolioService";
+import { getHistoricalData } from "./priceService";
+import { LiveTradingService } from "./liveTestingService";
+import { BacktestingService } from "./backtestingService";
 
 interface RiskParameters {
   maxPositionSize: number;
@@ -23,7 +23,7 @@ export class TradingService {
   constructor(
     initialBalance: number,
     riskParams: RiskParameters,
-    strategyManager?: StrategyManager
+    strategyManager?: StrategyManager,
   ) {
     this.portfolioManager = new PortfolioManager(initialBalance, riskParams);
     this.liveTradingService = new LiveTradingService(initialBalance);
@@ -57,19 +57,19 @@ export class TradingService {
     symbol: string,
     interval: string,
     startTime: number,
-    endTime: number
+    endTime: number,
   ) {
     try {
       const historicalData = await getHistoricalData(
         symbol,
         interval,
         startTime,
-        endTime
+        endTime,
       );
 
       if (!historicalData || historicalData.length < 50) {
         throw new Error(
-          'Insufficient historical data for indicator calculation'
+          "Insufficient historical data for indicator calculation",
         );
       }
 
@@ -78,7 +78,7 @@ export class TradingService {
       const bollinger = TechnicalIndicators.calculateBollingerBands(
         historicalData,
         20,
-        2
+        2,
       );
       const sma = TechnicalIndicators.calculateSMA(historicalData, 20);
       const ema = TechnicalIndicators.calculateEMA(historicalData, 20);
@@ -90,11 +90,11 @@ export class TradingService {
           macd,
           bollinger,
           sma,
-          ema
-        }
+          ema,
+        },
       };
     } catch (error) {
-      console.error('Error calculating indicators:', error);
+      console.error("Error calculating indicators:", error);
       throw error;
     }
   }
@@ -102,13 +102,13 @@ export class TradingService {
   // Portfolio Management
   async openPosition(
     symbol: string,
-    side: 'long' | 'short',
+    side: "long" | "short",
     price: number,
     stopLoss: number,
-    takeProfit: number
+    takeProfit: number,
   ) {
     if (!symbol || !price || !stopLoss || !takeProfit) {
-      throw new Error('Missing required parameters for opening position');
+      throw new Error("Missing required parameters for opening position");
     }
 
     return this.portfolioManager.openPosition(
@@ -116,13 +116,13 @@ export class TradingService {
       side,
       price,
       stopLoss,
-      takeProfit
+      takeProfit,
     );
   }
 
   async closePosition(symbol: string) {
     if (!symbol) {
-      throw new Error('Symbol is required to close position');
+      throw new Error("Symbol is required to close position");
     }
     return this.portfolioManager.closePosition(symbol);
   }
@@ -143,42 +143,37 @@ export class TradingService {
   async startLiveTrading(
     strategyId: string,
     symbol: string,
-    options: { timeframe?: string }
+    options: { timeframe?: string },
   ): Promise<string> {
     if (!strategyId || !symbol) {
-      throw new Error('Missing required parameters for live trading');
+      throw new Error("Missing required parameters for live trading");
     }
 
     // Get strategy configuration
-    const strategy = await this.strategyManager.getStrategy(strategyId);
+    const strategy = this.strategyManager.getStrategy(strategyId);
     if (!strategy) {
-      throw new Error('Strategy not found');
+      throw new Error("Strategy not found");
     }
-
-    // Combine strategy configuration with timeframe
-    const completeStrategy: Strategy & { timeframe?: string } = {
-      ...strategy,
-      timeframe: options.timeframe || '1m'
-    };
 
     // Start live trading with complete strategy configuration
     return this.liveTradingService.startLiveTrade(
       strategyId,
       symbol,
-      completeStrategy
+      this.strategyManager,
+      options.timeframe,
     );
   }
 
   async stopLiveTrading(tradeId: string) {
     if (!tradeId) {
-      throw new Error('Trade ID is required to stop live trading');
+      throw new Error("Trade ID is required to stop live trading");
     }
     this.liveTradingService.stopLiveTrade(tradeId);
   }
 
   getLiveTradingStatus(tradeId: string) {
     if (!tradeId) {
-      throw new Error('Trade ID is required to get status');
+      throw new Error("Trade ID is required to get status");
     }
     return this.liveTradingService.getLiveTradeStatus(tradeId);
   }
@@ -189,30 +184,30 @@ export class TradingService {
     symbol: string,
     timeframe: string,
     startTime: number,
-    endTime: number
+    endTime: number,
   ) {
     if (!strategyId || !symbol || !timeframe || !startTime || !endTime) {
-      throw new Error('Missing required parameters for backtesting');
+      throw new Error("Missing required parameters for backtesting");
     }
 
     if (endTime <= startTime) {
-      throw new Error('End time must be greater than start time');
+      throw new Error("End time must be greater than start time");
     }
 
-    const strategy = await this.strategyManager.getStrategy(strategyId);
+    const strategy = this.strategyManager.getStrategy(strategyId);
     if (!strategy) {
-      throw new Error('Strategy not found');
+      throw new Error("Strategy not found");
     }
 
     const historicalData = await getHistoricalData(
       symbol,
       timeframe,
       startTime,
-      endTime
+      endTime,
     );
 
     if (!historicalData || historicalData.length < 50) {
-      throw new Error('Insufficient historical data for backtesting');
+      throw new Error("Insufficient historical data for backtesting");
     }
 
     try {
@@ -220,20 +215,20 @@ export class TradingService {
         indicators: strategy.indicators,
         entryConditions: strategy.entryConditions,
         exitConditions: strategy.exitConditions,
-        riskManagement: strategy.riskManagement
+        riskManagement: strategy.riskManagement,
       });
 
       await this.strategyManager.saveBacktestResult(strategyId, result);
       return result;
     } catch (error) {
-      console.error('Backtest error:', error);
-      throw new Error('Failed to run backtest');
+      console.error("Backtest error:", error);
+      throw new Error("Failed to run backtest");
     }
   }
 
   async getBacktestResult(strategyId: string) {
     if (!strategyId) {
-      throw new Error('Strategy ID is required to get backtest result');
+      throw new Error("Strategy ID is required to get backtest result");
     }
     return this.strategyManager.getBacktestResult(strategyId);
   }

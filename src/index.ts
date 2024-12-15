@@ -1,8 +1,8 @@
-import express from 'express';
-import expressWs from 'express-ws';
-import dotenv from 'dotenv';
-import apiRoutes from './routes/apiRoutes';
-import { Instance } from 'express-ws';
+import express from "express";
+import expressWs from "express-ws";
+import dotenv from "dotenv";
+import apiRoutes from "./routes/apiRoutes";
+import { Instance } from "express-ws";
 
 dotenv.config();
 
@@ -17,12 +17,12 @@ app.use((req, res, next) => {
 });
 
 app.use((req, res, next) => {
-  res.header('Connection', 'keep-alive');
-  res.header('Keep-Alive', 'timeout=600');
+  res.header("Connection", "keep-alive");
+  res.header("Keep-Alive", "timeout=600");
   next();
 });
 
-app.use('/api', apiRoutes(wsApp));
+app.use("/api", apiRoutes(wsApp));
 
 const PORT = process.env.PORT || 3000;
 
